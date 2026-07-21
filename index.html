@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Galaxy Map Delaunay & Spine Program</title>
+    <style>
+        body {
+            background-color: #121212;
+            color: #e0e0e0;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        h2 {
+            margin-bottom: 10px;
+        }
+        #controls {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            background: #1e1e1e;
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: 1px solid #333;
+        }
+        canvas {
+            background: #ffffff; /* Keeping the canvas white like your original voronoi setup */
+            border: 1px solid #444;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            border-radius: 4px;
+            cursor: crosshair;
+        }
+        .info-panel {
+            margin-top: 15px;
+            display: flex;
+            gap: 30px;
+            font-size: 14px;
+            background: #1e1e1e;
+            padding: 10px 20px;
+            border-radius: 6px;
+            border: 1px solid #333;
+        }
+        .instructions {
+            margin-top: 15px;
+            max-width: 800px;
+            font-size: 13px;
+            color: #aaa;
+            line-height: 1.5;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>Galaxy Field Delaunay & Spine Finder</h2>
+    
+    <div id="controls">
+        <label for="csvFileInput">Upload Galaxy Field CSV:</label>
+        <input type="file" id="csvFileInput" accept=".csv">
+        <span id="status">No file loaded yet (Please upload a file to begin)</span>
+        <label><input type="checkbox" id="renderBackground" checked> Render Voronoi Cells</label>
+    </div>
+
+    <canvas id="aCanvas" width="1000" height="800"></canvas>
+    
+    <div class="info-panel">
+        <div><strong>Canvas X:</strong> <span id="x-value" style="color: #00ff00;">0</span></div>
+        <div><strong>Canvas Y:</strong> <span id="y-value" style="color: #00ff00;">0</span></div>
+        <div id="dataInfo">Upload a data catalog to see astronomical boundaries.</div>
+    </div>
+
+    <div class="instructions">
+        <strong>Controls:</strong> Click on a point to select it. Press <strong>'S'</strong> on your keyboard to set the selected point as the Path Start (Blue). Press <strong>'E'</strong> to set it as the Path End (Purple). The program will automatically trace the shortest spine path connection.
+    </div>
+
+    <script src="codespace_api.js"></script>
+    <script src="voronoipoint.js"></script>
+    <script src="delaunay.js"></script>
+    <script src="pathfinder.js"></script>
+    <script src="voronoi.js"></script>
+    <script src="dataloader.js"></script>
+    <script src="input.js"></script>
+
+</body>
+</html>
