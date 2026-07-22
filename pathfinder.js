@@ -1,80 +1,73 @@
-// Global tuning weights for the cosmic path evaluation engine
-var AREA_WEIGHT = 0.3;      // How heavily to penalize low-density/large cells
-var DISTANCE_WEIGHT = 2.0;  // How heavily to penalize long, inefficient leaps
+// =============================================================================
+// A* PATHFINDER WITH COSMIC DENSITY PENALTY MECHANICS
+// =============================================================================
 
-function buildGraphFromTriangulation() {
-    let graph = new Map();
-    voronoiPoints.forEach(p => graph.set(p, []));
+var generatedPaths = [];
 
-    for (let i = 0; i < voronoiPoints.length; i++) {
-        for (let j = i + 1; j < voronoiPoints.length; j++) {
-            for (let k = j + 1; k < voronoiPoints.length; k++) {
-                if (isDelaunayTriangle(i, j, k)) {
-                    let pA = voronoiPoints[i];
-                    let pB = voronoiPoints[j];
-                    let pC = voronoiPoints[k];
-
-                    if (!graph.get(pA).includes(pB)) graph.get(pA).push(pB);
-                    if (!graph.get(pA).includes(pC)) graph.get(pA).push(pC);
-                    if (!graph.get(pB).includes(pA)) graph.get(pB).push(pA);
-                    if (!graph.get(pB).includes(pC)) graph.get(pB).push(pC);
-                    if (!graph.get(pC).includes(pA)) graph.get(pC).push(pA);
-                    if (!graph.get(pC).includes(pB)) graph.get(pC).push(pB);
-                }
-            }
-        }
+/**
+ * Calculates local node density penalty based on Voronoi cell area / edge length.
+ * Larger cell area = sparser region = higher penalty cost for A*.
+ */
+function getNodePenalty(node) {
+    if (!node.cellPolygons || node.cellPolygons.length < 3) {
+        return 1.0; // Default baseline
     }
-    return graph;
+
+    // Estimate Voronoi Cell Area using Shoelace Formula
+    let area = 0;
+    let pts = node.cellPolygons;
+    for (let i = 0; i < pts.length; i++) {
+        let j = (i + 1) % pts.length;
+        area += pts[i].x * pts[j].y;
+        area -= pts[j].x * pts[i].y;
+    }
+    area = Math.abs(area) / 2.0;
+
+    // Scale penalty: larger cell area = higher penalty multiplier
+    return area;
 }
 
-// Custom scoring function that combines jump distance and cell area (density)
-function calculateEdgeCost(nodeA, nodeB) {
-    let dx = nodeB.point.x - nodeA.point.x;
-    let dy = nodeB.point.y - nodeA.point.y;
-    let distance = Math.sqrt(dx * dx + dy * dy);
-    
-    // Get the cell area footprint of the destination node
-    let cellArea = nodeB.pixelCount * (typeof GAP !== 'undefined' ? GAP * GAP : 36);
-
-    // Dynamic cost balance: penalize long jumps and large areas
-    return (distance * DISTANCE_WEIGHT) + (cellArea * AREA_WEIGHT);
-}
-
-// Standard A* heuristic function: straight line distance to target
-function getHeuristic(node, endNode) {
-    let dx = endNode.point.x - node.point.x;
-    let dy = endNode.point.y - node.point.y;
+/**
+ * Heuristic Function (h): Standard Euclidean distance to target end node.
+ */
+function heuristic(nodeA, nodeB) {
+    let dx = nodeA.point.x - nodeB.point.x;
+    let dy = nodeA.point.y - nodeB.point.y;
     return Math.sqrt(dx * dx + dy * dy);
 }
 
-function runAStarSearch(graph, start, end) {
-    let openSet = new Set([start]);
+/**
+ * Custom A* Search implementation using Edge Weight Penalties
+ */
+function findPathAStar(startNode, endNode, penaltyWeight = 2.0) {
+    let openSet = [startNode];
     let cameFrom = new Map();
 
     let gScore = new Map();
     let fScore = new Map();
+
+    // Normalize penalties across all nodes
+    let maxArea = 1;
+    voronoiPoints.forEach(p => {
+        let pVal = getNodePenalty(p);
+        if (pVal > maxArea) maxArea = pVal;
+    });
 
     voronoiPoints.forEach(p => {
         gScore.set(p, Infinity);
         fScore.set(p, Infinity);
     });
 
-    gScore.set(start, 0);
-    fScore.set(start, getHeuristic(start, end));
+    gScore.set(startNode, 0);
+    fScore.set(startNode, heuristic(startNode, endNode));
 
-    while (openSet.size > 0) {
-        // Find the node in openSet having the lowest fScore value
-        let current = null;
-        let lowestF = Infinity;
-        openSet.forEach(node => {
-            if (fScore.get(node) < lowestF) {
-                lowestF = fScore.get(node);
-                current = node;
-            }
-        });
+    while (openSet.length > 0) {
+        // Pick open node with lowest total estimated cost f(n) = g(n) + h(n)
+        openSet.sort((a, b) => fScore.get(a) - fScore.get(b));
+        let current = openSet.shift();
 
-        if (current === end) {
-            // Reconstruct path
+        if (current === endNode) {
+            // Reconstruct path array
             let path = [current];
             while (cameFrom.has(current)) {
                 current = cameFrom.get(current);
@@ -83,65 +76,122 @@ function runAStarSearch(graph, start, end) {
             return path;
         }
 
-        openSet.delete(current);
-        let neighbors = graph.get(current) || [];
+        if (!current.neighbors) continue;
 
-        for (let i = 0; i < neighbors.length; i++) {
-            let neighbor = neighbors[i];
-            
-            // Calculate movement cost including density penalty
-            let edgeCost = calculateEdgeCost(current, neighbor);
-            let tentativeGScore = gScore.get(current) + edgeCost;
+        for (let neighbor of current.neighbors) {
+            // Distance between parent and neighbor
+            let baseDistance = heuristic(current, neighbor);
 
-            if (tentativeGScore < gScore.get(neighbor)) {
+            // Calculate Void Penalty Multiplier for the target neighbor node
+            let normalizedPenalty = getNodePenalty(neighbor) / maxArea; // Range 0 to 1
+            let penaltyMultiplier = 1.0 + (penaltyWeight * normalizedPenalty);
+
+            // Cost g(n) = g(parent) + penalized step cost
+            let stepCost = baseDistance * penaltyMultiplier;
+            let tentativeG = gScore.get(current) + stepCost;
+
+            if (tentativeG < gScore.get(neighbor)) {
                 cameFrom.set(neighbor, current);
-                gScore.set(neighbor, tentativeGScore);
-                fScore.set(neighbor, tentativeGScore + getHeuristic(neighbor, end));
-                openSet.add(neighbor);
+                gScore.set(neighbor, tentativeG);
+                fScore.set(neighbor, tentativeG + heuristic(neighbor, endNode));
+
+                if (!openSet.includes(neighbor)) {
+                    openSet.push(neighbor);
+                }
             }
         }
     }
-    return null; // No path found
+
+    return null; // Path blocked or unnavigable
 }
 
-function drawShortestPath() {
-    try {
-        if (typeof voronoiPoints === 'undefined' || !voronoiPoints) return;
-        
-        let startNode = voronoiPoints.find(p => p.isStart);
-        let endNode = voronoiPoints.find(p => p.isEnd);
-        if (!startNode || !endNode) return;
+/**
+ * Runs pathfinding across all tagged Start and End groups.
+ */
+function computeAllPaths() {
+    generatedPaths = [];
 
-        let graph = buildGraphFromTriangulation();
-        if (!graph) return;
+    let startNodes = voronoiPoints.filter(p => p.isStart);
+    let endNodes = voronoiPoints.filter(p => p.isEnd);
 
-        // Execute optimized A* structural search
-        let path = runAStarSearch(graph, startNode, endNode);
+    if (startNodes.length === 0 || endNodes.length === 0) return;
 
-        if (path && path.length > 1) {
-            ctx.save();
-            ctx.strokeStyle = "#FF8C00"; // Clean orange filament line
-            ctx.lineWidth = 5;
-            ctx.lineJoin = "round";
-            ctx.lineCap = "round";
+    // Get penalty multiplier strength from slider input (defaulting to 2.0 if missing)
+    let penaltyInput = document.getElementById('penaltyWeight');
+    let penaltyWeight = penaltyInput ? parseFloat(penaltyInput.value) : 2.0;
 
-            ctx.beginPath();
-            ctx.moveTo(path[0].point.x, path[0].point.y);
-            for (let i = 1; i < path.length; i++) {
-                ctx.lineTo(path[i].point.x, path[i].point.y);
+    startNodes.forEach(start => {
+        let targetEnd = null;
+        let minDist = Infinity;
+
+        endNodes.forEach(end => {
+            let dist = heuristic(start, end);
+            if (dist < minDist) {
+                minDist = dist;
+                targetEnd = end;
             }
-            ctx.stroke();
-            ctx.restore();
-            
-            let status = document.getElementById('status');
-            if (status) status.textContent = `Path mapped successfully using A* engine (${path.length} nodes).`;
-        } else {
-            let status = document.getElementById('status');
-            if (status && voronoiPoints.length > 0) {
-                status.textContent = "Pathfinding Error: Unable to resolve optimal cosmic spine line.";
+        });
+
+        if (targetEnd) {
+            let path = findPathAStar(start, targetEnd, penaltyWeight);
+            if (path) {
+                generatedPaths.push(path);
             }
         }
-    } catch (e) {
-        console.error("Pathfinding error: ", e);
+    });
+}
+
+/**
+ * Draws the calculated A* paths on canvas.
+ */
+function drawShortestPath() {
+    computeAllPaths();
+
+    if (generatedPaths.length === 0) return;
+
+    let canvas = document.getElementById('aCanvas');
+    if (!canvas) return;
+    let ctx = canvas.getContext('2d');
+
+    ctx.lineWidth = 3;
+
+    generatedPaths.forEach((path, idx) => {
+        const colors = ['#ff0055', '#ffaa00', '#00e5ff', '#33ff00', '#e600ff'];
+        ctx.strokeStyle = colors[idx % colors.length];
+
+        ctx.beginPath();
+        ctx.moveTo(path[0].point.x, path[0].point.y);
+
+        for (let i = 1; i < path.length; i++) {
+            ctx.lineTo(path[i].point.x, path[i].point.y);
+        }
+        ctx.stroke();
+    });
+}
+
+/**
+ * Exports paths to CSV format
+ */
+function exportPathsCSV() {
+    if (generatedPaths.length === 0) {
+        alert("No active path to export. Please select Start and End nodes.");
+        return;
     }
+
+    let csvContent = "data:text/csv;charset=utf-8,Path_ID,Node_Order,RA,Dec,Canvas_X,Canvas_Y\n";
+
+    generatedPaths.forEach((path, pathIdx) => {
+        path.forEach((node, nodeIdx) => {
+            let row = `${pathIdx + 1},${nodeIdx + 1},${node.ra},${node.dec},${node.point.x},${node.point.y}`;
+            csvContent += row + "\n";
+        });
+    });
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "filament_paths_export.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 }

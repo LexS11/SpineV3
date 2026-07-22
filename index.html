@@ -2,87 +2,133 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Galaxy Map Delaunay & Spine Program</title>
+    <title>Cosmic Filament Pathfinder</title>
     <style>
         body {
-            background-color: #121212;
-            color: #e0e0e0;
             font-family: Arial, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 20px;
+            background-color: #121212;
+            color: #ffffff;
+            margin: 20px;
         }
-        h2 {
-            margin-bottom: 10px;
-        }
-        #controls {
-            margin-bottom: 20px;
-            display: flex;
-            gap: 15px;
-            align-items: center;
-            background: #1e1e1e;
-            padding: 10px 20px;
-            border-radius: 8px;
-            border: 1px solid #333;
+        #canvasContainer {
+            margin-top: 15px;
         }
         canvas {
-            background: #ffffff; /* Keeping the canvas white like your original voronoi setup */
             border: 1px solid #444;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-            border-radius: 4px;
+            background-color: #ffffff;
             cursor: crosshair;
         }
-        .info-panel {
-            margin-top: 15px;
-            display: flex;
-            gap: 30px;
-            font-size: 14px;
-            background: #1e1e1e;
-            padding: 10px 20px;
-            border-radius: 6px;
-            border: 1px solid #333;
+        #controls {
+            background-color: #1e1e1e;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            max-width: 1000px;
         }
-        .instructions {
-            margin-top: 15px;
-            max-width: 800px;
-            font-size: 13px;
+        .control-group {
+            margin-bottom: 12px;
+        }
+        label {
+            margin-right: 15px;
+        }
+        input[type="number"] {
+            background: #2a2a2a;
+            border: 1px solid #555;
+            color: #fff;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #007acc;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 5px;
+        }
+        button:hover {
+            background-color: #005999;
+        }
+        .btn-export {
+            background-color: #28a745;
+        }
+        .btn-export:hover {
+            background-color: #1e7e34;
+        }
+        .btn-clear {
+            background-color: #cc2222;
+        }
+        .btn-clear:hover {
+            background-color: #991111;
+        }
+        #dataInfo {
+            background-color: #262626;
+            padding: 10px;
+            border-left: 4px solid #00ff00;
+            margin-top: 10px;
+            font-family: monospace;
+        }
+        #status {
             color: #aaa;
-            line-height: 1.5;
-            text-align: center;
+            font-style: italic;
         }
     </style>
 </head>
 <body>
 
-    <h2>Galaxy Field Delaunay & Spine Finder</h2>
-    
+    <h2>Cosmic Structure Pathfinder</h2>
+
     <div id="controls">
-        <label for="csvFileInput">Upload Galaxy Field CSV:</label>
-        <input type="file" id="csvFileInput" accept=".csv">
-        <span id="status">No file loaded yet (Please upload a file to begin)</span>
-        <label><input type="checkbox" id="renderBackground" checked> Render Voronoi Cells</label>
+        <div class="control-group">
+            <label><strong>1. Galaxy Catalog CSV:</strong> <input type="file" id="csvFileInput" accept=".csv"></label>
+            <label><input type="checkbox" id="renderBackground" checked onchange="tesselate()"> Render Voronoi / Triangulation</label>
+        </div>
+        <label>
+            <strong>Void Penalty Multiplier:</strong> 
+            <input type="range" id="penaltyWeight" min="0" max="10" step="0.5" value="3.0" oninput="tesselate(); document.getElementById('penaltyVal').textContent = this.value;">
+            <span id="penaltyVal">3.0</span>
+        </label>
+        
+
+        <hr style="border-color: #333;">
+
+        <div class="control-group">
+            <strong>2. Group Selection & Output:</strong><br>
+            <div style="margin-top: 8px;">
+                RA (°): <input type="number" id="inputRa" step="0.0001" style="width: 90px;" placeholder="96.0655">
+                Dec (°): <input type="number" id="inputDec" step="0.0001" style="width: 90px;" placeholder="-53.6190">
+                
+                Group Size (k): 
+                <input type="number" id="inputK" value="1" min="1" max="20" style="width: 55px;">
+
+                <button id="btnSetStart">Set Start Group (Blue)</button>
+                <button id="btnSetEnd">Set End Group (Purple)</button>
+                <button id="btnClearGroups" class="btn-clear">Clear Selections</button>
+                <button onclick="exportPathsCSV()" class="btn-export">Export Paths CSV</button>
+            </div>
+        </div>
+        <div style="font-size: 0.85em; color: #888;">
+            <em>Tip: Hover and click nodes on canvas or select groups to generate multiple path filaments!</em>
+        </div>
     </div>
 
-    <canvas id="aCanvas" width="1000" height="800"></canvas>
-    
-    <div class="info-panel">
-        <div><strong>Canvas X:</strong> <span id="x-value" style="color: #00ff00;">0</span></div>
-        <div><strong>Canvas Y:</strong> <span id="y-value" style="color: #00ff00;">0</span></div>
-        <div id="dataInfo">Upload a data catalog to see astronomical boundaries.</div>
+    <div id="status">Load your galaxy catalog CSV to get started.</div>
+
+    <div id="canvasContainer">
+        <canvas id="aCanvas" width="1000" height="800"></canvas>
     </div>
 
-    <div class="instructions">
-        <strong>Controls:</strong> Click on a point to select it. Press <strong>'S'</strong> on your keyboard to set the selected point as the Path Start (Blue). Press <strong>'E'</strong> to set it as the Path End (Purple). The program will automatically trace the shortest spine path connection.
+    <div id="dataInfo">
+        Position: X: <span id="x-value">0</span> | Y: <span id="y-value">0</span>
     </div>
 
-    <script src="codespace_api.js"></script>
+    <script src="constants.js"></script>
     <script src="voronoipoint.js"></script>
-    <script src="delaunay.js"></script>
-    <script src="pathfinder.js"></script>
-    <script src="voronoi.js"></script>
     <script src="dataloader.js"></script>
+    <script src="delaunay.js"></script>
+    <script src="voronoi.js"></script>
+    <script src="pathfinder.js"></script>
     <script src="input.js"></script>
-
 </body>
 </html>
